@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# API Key for OpenWeatherMap
+API_KEY="77a66764be0e2ebd92b491f764d791ea"
+
+# Create an array of cities
+cities=("Tokyo" "Paris" "Cape Town" "New York" "Sydney" "Mumbai" "Buenos Aires" "Cairo" "Berlin" "Bangkok")
+
+# Pick a random city
+random_city=${cities[$RANDOM % ${#cities[@]}]}
+
+# Output the randomly selected city
+echo "Randomly Selected City: $random_city"
+
+# Ask the user to guess the temperature
+echo "What do you think the current temperature in $random_city is (in Celsius)?"
+read user_guess
+
+# Store the guess in a variable
+user_temperature_guess=$user_guess
+
+# Get the actual temperature from the OpenWeatherMap API
+response=$(curl -s "https://openweathermap.org/=$random_city&appid=$API_KEY&units=metric")
+actual_temperature=$(echo $response | jq '.main.temp')
+
+# Check if the temperature was retrieved successfully
+if [[ $actual_temperature == "null" || -z $actual_temperature ]]; then
+    echo "Could not retrieve temperature for $random_city. Please check the city name or API key."
+    exit 1
+fi
+
+# Output the user's guess
+echo "You guessed: $user_temperature_guess°C."
+
+# Output the actual temperature
+echo "The actual temperature in $random_city is $actual_temperature°C."
+
+# Compare the guess with the actual temperature
+if (( $(echo "$user_temperature_guess == $actual_temperature" | bc -l) )); then
+    echo "Amazing! Your guess is correct."
+elif (( $(echo "$user_temperature_guess > $actual_temperature" | bc -l) )); then
+    echo "Too high! Your guess is above the actual temperature."
+else
+    echo "Too low! Your guess is below the actual temperature."
+fi
