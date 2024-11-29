@@ -1,0 +1,78 @@
+#!/bin/bash
+
+# Content-Type header for CGI
+echo "Content-Type: text/html; charset=utf-8"
+echo ""
+
+# HTML header with UTF-8
+echo "<!DOCTYPE html>"
+echo "<html lang='en'>"
+echo "<head>"
+echo "<meta charset='UTF-8'>"
+echo "<title>Guess the Temperature</title>"
+echo "</head>"
+echo "<body>"
+echo "<style>"
+echo "body {"
+echo "    text-align: center;"
+echo "}"
+echo "</style>"
+
+# API Key for OpenWeatherMap
+API_KEY="77a66764be0e2ebd92b491f764d791ea"
+
+# Create an array of cities
+cities=("Tokyo" "Paris" "Sydney" "Mumbai" "Cairo" "Berlin" "Bangkok")
+
+# Function to play the game
+play_game() {
+    # Pick a random city
+    random_city=${cities[$RANDOM % ${#cities[@]}]}
+
+    # Display the city to the user
+    echo "<h1>Guess the Temperature</h1>"
+    echo "<p>Randomly Selected City: $random_city</p>"
+
+    # Form to allow the user to input their guess
+    echo "<form method='POST'>"
+    echo "<label for='guess'>Enter your temperature guess (°C):</label><br>"
+    echo "<input type='number' id='guess' name='guess' required><br><br>"
+    echo "<input type='submit' value='Submit Guess'>"
+    echo "</form>"
+
+    # If the form is submitted (POST request), process the guess
+    if [[ "$REQUEST_METHOD" == "POST" ]]; then
+        read -n "$CONTENT_LENGTH" POST_DATA
+        user_guess=$(echo "$POST_DATA" | cut -d'=' -f2)
+
+        # Get the actual temperature from the OpenWeatherMap API
+        response=$(curl -s "https://api.openweathermap.org/data/2.5/weather?q=$random_city&appid=$API_KEY&units=metric")
+        actual_temperature=$(echo "$response" | jq '.main.temp')
+
+        # Check if the temperature was retrieved successfully
+        if [[ $actual_temperature == "null" || -z $actual_temperature ]]; then
+            echo "<p>Could not retrieve temperature for $random_city. Please check the city name or API key.</p>"
+            return
+        fi
+
+        # Show the result after the user has guessed
+        echo "<p>You guessed: $user_guess°C.</p>"
+        echo "<p>The actual temperature in $random_city is $actual_temperature°C.</p>"
+
+        # Compare the user's guess to the actual temperature
+        if (( $(echo "${user_guess%.*} == ${actual_temperature%.*}" | bc -l) )); then
+            echo "<p>Amazing! Your guess is correct.</p>"
+        elif (( $(echo "$user_guess > $actual_temperature" | bc -l) )); then
+            echo "<p>Too high! Your guess is above the actual temperature.</p>"
+        else
+            echo "<p>Too low! Your guess is below the actual temperature.</p>"
+        fi
+    fi
+}
+
+# Main function to run the game
+play_game
+
+# HTML footer
+echo "</body>"
+echo "</html>"
