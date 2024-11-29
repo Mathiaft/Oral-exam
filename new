@@ -1,0 +1,72 @@
+#!/bin/bash
+
+# Function to fetch the weather data using Open Meteo API
+get_weather() {
+    local lat=$1
+    local lon=$2
+    # Fetch weather data for the city
+    weather_data=$(curl -s "https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m")
+    # Get the temperature for the current hour
+    temp=$(echo "$weather_data" | jq '.hourly.temperature_2m[0]')
+    echo "$temp"
+}
+
+# Function to start the game
+start_game() {
+    # Read city data from cityfiles.txt
+    cities=()
+    while IFS= read -r line; do
+        cities+=("$line")
+    done < "cityfiles.txt"
+
+    # Select a random city
+    random_city=${cities[$RANDOM % ${#cities[@]}]}
+    
+    # Extract city name, latitude, and longitude
+    city_name=$(echo "$random_city" | cut -d ' ' -f 1-2)
+    lat=$(echo "$random_city" | grep -oP 'Latitude: \K[^\s,]*')
+    lon=$(echo "$random_city" | grep -oP 'Longitude: \K[^\s,]*')
+
+    # Get the current temperature for the city
+    current_temp=$(get_weather "$lat" "$lon")
+
+    # Start HTML page
+    echo "Content-Type: text/html; charset=utf-8"
+    echo ""
+    echo "<html><head><title>Weather Guessing Game</title></head><body>"
+
+    # Game instructions and city hint
+    echo "<h1>Welcome to the City and Temperature Guessing Game!</h1>"
+    echo "<p>Try to guess the current temperature in the city below.</p>"
+    echo "<p><strong>Hint:</strong> The city is $city_name.</p>"
+
+    # Display the temperature guess form
+    echo "<form method='POST' action=''>"
+    echo "<label for='temp_guess'>Enter your guess for the temperature in Celsius:</label><br>"
+    echo "<input type='number' name='temp_guess' id='temp_guess' required><br><br>"
+    echo "<input type='submit' value='Submit Guess'>"
+    echo "</form>"
+
+    # Process the submitted guess if form is POSTed
+    if [ "$REQUEST_METHOD" == "POST" ]; then
+        # Get form values (temperature guess)
+        read -r input
+        temp_guess=$(echo "$input" | grep -oP 'temp_guess=\K[^&]*' | sed 's/%20/ /g')
+
+        # Compare guessed temperature with the actual temperature
+        difference=$(echo "$temp_guess - $current_temp" | bc -l)
+        abs_difference=$(echo "$difference" | awk '{if ($1<0) print -$1; else print $1}')
+        if (( $(echo "$abs_difference < 5" | bc -l) )); then
+            echo "<p>You won! Your guess was within 5°C of the actual temperature: $current_temp°C.</p>"
+        else
+            echo "<p>You lost. Your guess was more than 5°C off from the actual temperature: $current_temp°C.</p>"
+        fi
+    fi
+
+    # Ask if the user wants to play again
+    echo "<p><a href=''>Play Again</a></p>"
+    echo "</body></html>"
+}
+
+# Start the game
+start_game
