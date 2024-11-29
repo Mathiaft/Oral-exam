@@ -1,0 +1,75 @@
+#!/bin/bash
+
+# Content-Type header for CGI
+echo "Content-Type: text/html; charset=utf-8"
+echo ""
+
+# Function to fetch the weather data using Open Meteo API
+get_weather() {
+    local lat=$1
+    local lon=$2
+    # Using curl to get the current weather
+    weather_data=$(curl -s "https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true")
+    echo "$weather_data"
+}
+
+# Function to start the game
+start_game() {
+    # Read city data from citiesfile.txt
+    if [ ! -f "cityfiles.txt" ]; then
+        echo "cityfiles.txt not found! Make sure the file exists."
+        exit 1
+    fi
+
+    # Select a random line (city) from the citiesfile.txt
+    city_data=$(shuf -n 1 cityfiles.txt)
+    city_name=$(echo "$city_data" | cut -d ',' -f 1)
+    lat=$(echo "$city_data" | cut -d ',' -f 2)
+    lon=$(echo "$city_data" | cut -d ',' -f 3)
+
+    # Fetch weather data for the selected city
+    weather_data=$(get_weather "$lat" "$lon")
+    
+    # Parse the temperature and wind speed from the JSON response using jq
+    temp=$(echo "$weather_data" | jq '.current_weather.temperature')
+    wind_speed=$(echo "$weather_data" | jq '.current_weather.windspeed')
+
+    # Introduce the game
+    echo "Welcome to the Weather Guess Game!"
+    echo "This round is for the city of: $city_name"
+    echo "Guess the current temperature (in Celsius) and wind speed (in km/h) for $city_name."
+
+    # Ask for the player's guesses
+    echo -n "Guess the temperature (in Celsius): "
+    read temp_guess
+    echo -n "Guess the wind speed (in km/h): "
+    read wind_guess
+
+    # Provide feedback on the guesses
+    echo "Actual temperature: $temp°C"
+    echo "Actual wind speed: $wind_speed km/h"
+
+    # Calculate the difference from the actual values
+    temp_diff=$(echo "$temp_guess - $temp" | bc)
+    wind_diff=$(echo "$wind_guess - $wind_speed" | bc)
+
+    echo "Your guesses were: Temperature: $temp_guess, Wind Speed: $wind_guess"
+    echo "Difference in temperature: $temp_diff°C"
+    echo "Difference in wind speed: $wind_diff km/h"
+
+    # Game outcome
+    if (( $(echo "$temp_diff < 2" | bc -l) )); then
+        echo "Great job! Your temperature guess was very close!"
+    else
+        echo "Not quite right on the temperature. Try again!"
+    fi
+
+    if (( $(echo "$wind_diff < 2" | bc -l) )); then
+        echo "Great job! Your wind speed guess was very close!"
+    else
+        echo "Not quite right on the wind speed. Try again!"
+    fi
+}
+
+# Start the game
+start_game
