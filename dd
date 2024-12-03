@@ -1,92 +1,87 @@
 #!/bin/bash
 
-# Content-Type header for CGI
-echo "Content-Type: text/html; charset=utf-8"
-echo ""
-
 # Function to fetch the weather data using Open Meteo API
+# Get weather is a function to encapsulate a block of code that can be reused multiple times
 get_weather() {
+# Local declares variables that are only accessible within the function
+# $1 and $2 are the first and second arguments passed to the function
     local lat=$1
     local lon=$2
-    # Using curl to get the current weather (temperature for the specific latitude and longitude)
+    # Fetch weather data for the city
+    # Curl is a tool to fetch data from a URL (Uniform Resource Locator)
+    # -S is to silent all the progress and /or error if they occur, it wil only show exactly what we want.
     weather_data=$(curl -s "https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m")
-    echo "$weather_data"
+    # Get the temperature for the current hour
+    # Extracts the first hourly temperature from the JSON weather data (using jq).[0] retrieves the first element of temperature_2 array
+    temp=$(echo "$weather_data" | jq '.hourly.temperature_2m[0]')
+    echo "$temp"
 }
 
 # Function to start the game
 start_game() {
     # Read city data from cityfiles.txt
-    if [ ! -f "cityfiles.txt" ]; then
-        echo "<html><body><h2>Error: cityfiles.txt not found! Make sure the file exists.</h2></body></html>"
-        exit 1
-    fi
+    cities=()
+    while IFS= read -r line; do
+        cities+=("$line")
+    done < "cityfiles.txt"
 
-    # Select a random line (city) from the cityfiles.txt
-    city_data=$(shuf -n 1 cityfiles.txt)
+    # Select a random city
+    random_city=${cities[$RANDOM % ${#cities[@]}]}
     
-    # Extract the city name, latitude, and longitude (ignoring altitude)
-    city_name=$(echo "$city_data" | cut -d ' ' -f 1-2)
-    lat=$(echo "$city_data" | grep -oP 'Latitude: \K[^\s,]*')
-    lon=$(echo "$city_data" | grep -oP 'Longitude: \K[^\s,]*')
+    # Extract city name, latitude, and longitude
+    city_name=$(echo "$random_city" | cut -d ' ' -f 1-2)
+    lat=$(echo "$random_city" | grep -oP 'Latitude: \K[^\s,]*')
+    lon=$(echo "$random_city" | grep -oP 'Longitude: \K[^\s,]*')
 
-    # Fetch weather data for the selected city
-    weather_data=$(get_weather "$lat" "$lon")
-    
-    # Parse the temperature from the JSON response using jq (we fetch the first hourly temperature)
-    temp=$(echo "$weather_data" | jq '.hourly.temperature_2m[0]')
+    # Get the current temperature for the city
+    current_temp=$(get_weather "$lat" "$lon")
 
-    # Tolerance level for the temperature guess
-    tolerance=0.5
+    # Start HTML page
+    echo "Content-Type: text/html; charset=utf-8"
+    echo ""
+    echo "<html><head><title>Weather Guessing Game</title></head><body>"
 
-    # If form data is available (POST), process it
+    # Game instructions and city hint
+    echo "<h1>Welcome to the City and Temperature Guessing Game!</h1>"
+    echo "<p>Try to guess the current temperature in the city below.</p>"
+    echo "<p><strong>Hint:</strong> The city is $city_name.</p>"
+
+    # Display the temperature guess form with hidden fields for the city info
+    echo "<form method='POST' action=''>"
+    echo "<label for='temp_guess'>Enter your guess for the temperature in Celsius:</label><br>"
+    echo "<input type='number' name='temp_guess' id='temp_guess' required><br><br>"
+    echo "<input type='hidden' name='city_name' value='$city_name'>"
+    echo "<input type='hidden' name='lat' value='$lat'>"
+    echo "<input type='hidden' name='lon' value='$lon'>"
+    echo "<input type='submit' value='Submit Guess'>"
+    echo "</form>"
+
+    # Process the submitted guess if form is POSTed
     if [ "$REQUEST_METHOD" == "POST" ]; then
-        # Get form values (guesses from the player)
+        # Get form values (temperature guess and city info)
         read -r input
         temp_guess=$(echo "$input" | grep -oP 'temp_guess=\K[^&]*' | sed 's/%20/ /g')
+        city_name=$(echo "$input" | grep -oP 'city_name=\K[^&]*' | sed 's/%20/ /g')
+        lat=$(echo "$input" | grep -oP 'lat=\K[^&]*')
+        lon=$(echo "$input" | grep -oP 'lon=\K[^&]*')
 
-        # Convert guess to a number
-        temp_guess=$(echo "$temp_guess" | sed 's/[^0-9.-]//g')
+        # Get the current temperature for the city
+        current_temp=$(get_weather "$lat" "$lon")
 
-        # Show the results of the guess
-        echo "<html><body>"
-        echo "<h1>Weather Guessing Game Result</h1>"
-        echo "<p>You guessed the temperature to be: <strong>$temp_guess</strong>°C</p>"
-        echo "<p>Actual temperature: <strong>$temp°C</strong></p>"
-
-        # Calculate the absolute difference between guessed and actual temperature
-        difference=$(echo "$temp_guess - $temp" | bc -l)
+        # Compare guessed temperature with the actual temperature
+        difference=$(echo "$temp_guess - $current_temp" | bc -l)
         abs_difference=$(echo "$difference" | awk '{if ($1<0) print -$1; else print $1}')
-
-        # Game outcome based on proximity of guess
-        if (( $(echo "$abs_difference <= $tolerance" | bc -l) )); then
-            echo "<p>Great job! You guessed within the acceptable range!</p>"
+        if (( $(echo "$abs_difference < 5" | bc -l) )); then
+            echo "<p>You won! Your guess was within 5°C of the actual temperature: $current_temp°C.</p>"
         else
-            echo "<p>Not quite right on the temperature. Try again!</p>"
+            echo "<p>You lost. Your guess was more than 5°C off from the actual temperature: $current_temp°C.</p>"
         fi
-
-        # Save the guess, city, and result to guess_temperature.txt
-        echo "$city_name: Guessed: $temp_guess, Actual: $temp" >> guess_temperature.txt
-
-        # Link to play again
-        echo "<br><a href=''>Play Again</a>"
-        echo "</body></html>"
-    else
-        # Show the initial form to input guesses
-        echo "<html><body>"
-        echo "<h1>Welcome to the Weather Guess Game!</h1>"
-        echo "<p>This round is for the city of: <strong>$city_name</strong></p>"
-        echo "<p>Guess the current temperature (in Celsius) for <strong>$city_name</strong>.</p>"
-
-        # Form for user to input guesses
-        echo "<form method='POST' action=''>"
-        echo "<label for='temp_guess'>Guess the temperature (in Celsius):</label><br>"
-        echo "<input type='number' name='temp_guess' id='temp_guess' required><br><br>"
-        echo "<input type='submit' value='Submit Guess'>"
-        echo "</form>"
-        echo "</body></html>"
     fi
+
+    # Ask if the user wants to play again
+    echo "<p><a href=''>Play Again</a></p>"
+    echo "</body></html>"
 }
 
 # Start the game
 start_game
-
