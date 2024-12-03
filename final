@@ -1,0 +1,113 @@
+#!/bin/bash
+
+# Function to fetch the weather data using Open Meteo API
+# Function to fetch the weather data using Open Meteo API
+# Get weather is a function to encapsulate a block of code that can be reused multiple times
+get_weather() {
+    local lat=$1
+    local lon=$2
+    # Local declares variables that are only accessible within the function
+    # $1 and $2 are the first and second arguments passed to the function
+    # Fetch weather data for the city
+    weather_data=$(curl -s "https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m")
+    # Get the temperature for the current hour
+    # Curl is a tool to fetch data from a URL (Uniform Resource Locator)
+    # -S is to silent all the progress and /or error if they occur, it will only show exactly what we want.
+    temp=$(echo "$weather_data" | jq '.hourly.temperature_2m[0]')
+    echo "$temp"
+}
+
+# Function to start the game
+start_game() {
+    # Read city data from cityfiles.txt
+    # This is a while loop that reads the lines in cityfiles.txt
+    # IFS (Internal Field Seperator) temporarily sets it to an empty value to ensure the lines are read exactly as they appear
+    # -r prevents (read) to treat backslashes(/) it helps keep the line exactly as it is in the cityfiles.txt
+    cities=()
+    while IFS= read -r line; do
+        cities+=("$line")
+    done < "cityfiles.txt"
+
+    # Select a random city
+    # Random_city contains a randomly selected line from the city array
+    random_city=${cities[$RANDOM % ${#cities[@]}]}
+    
+    # Extract city name, latitude, and longitude
+    # Cut is a command-line tool to split the text based on a delimiter (-d)(Delimiter is seperating command arguments)
+    # ' ' specifies a space as the deilimiter
+    # -f 1-2 extracts the first two fields (words) seperated by the delimiter
+    city_name=$(echo "$random_city" | cut -d ' ' -f 1-2)
+
+    # Grep is used to search for text patterns within cityfiles.txt
+    # -o Outputs only the matching part of the line, not the entire input.
+    # Without -P, this pattern would not work because \K is specific to PCRE.
+    # PCRE (Perl-Compatible Regular Expressions) It is a library that provides a rich and advanced set of tools for working with regular expressions
+    # /K it removes everything matched before \K from the final result.
+    # [^\s,]*: Matches the latitude and longitude value
+    lat=$(echo "$random_city" | grep -oP 'Latitude: \K[^\s,]*')
+    lon=$(echo "$random_city" | grep -oP 'Longitude: \K[^\s,]*')
+
+    # Get the current temperature for the city
+    current_temp=$(get_weather "$lat" "$lon")
+
+    # Starting HTML page
+    # Without this, the browser won't recognize the start of the HTML content.
+    # Without specifying charset=utf-8, browsers may guess the encoding, leading to misrendered text
+    echo "Content-Type: text/html; charset=utf-8"
+    echo ""
+    echo "<html><head><title>Weather Guessing Game</title></head><body>"
+
+    # Game instructions and city hint
+    echo "<h1>Welcome to the City and Temperature Guessing Game!</h1>"
+    echo "<p>Try to guess the current temperature in the city below.</p>"
+    echo "<p><strong>Hint:</strong> The city is $city_name.</p>"
+
+    # Display the temperature guess form with hidden fields for the city info
+    echo "<form method='POST' action=''>"
+    echo "<label for='temp_guess'>Enter your guess for the temperature in Celsius:</label><br>"
+    echo "<input type='number' name='temp_guess' id='temp_guess' required><br><br>"
+    echo "<input type='hidden' name='city_name' value='$city_name'>"
+    echo "<input type='hidden' name='lat' value='$lat'>"
+    echo "<input type='hidden' name='lon' value='$lon'>"
+    echo "<input type='submit' value='Submit Guess'>"
+    echo "</form>"
+
+    # Process the submitted guess if form is POSTed
+    # This part is a Form submission, and it checks the user's guess and compares it to the actual temperature.
+    if [ "$REQUEST_METHOD" == "POST" ]; then
+        # Get form values (temperature guess and city info)
+        # sed in this case, is being used for search-and-replace
+        # s/old/new/g | s/%20/ /g
+        # s: Stands for substitute (find and replace).
+        # old: The pattern to search for (%20 in this case). The script needs to decode %20 back into a space ( ) to properly handle the data.
+        # new: The text to replace it with (a space character, ).
+        # g: Stands for global, meaning replace all occurrences in the input, not just the first one.
+        read -r input
+        temp_guess=$(echo "$input" | grep -oP 'temp_guess=\K[^&]*' | sed 's/%20/ /g')
+        city_name=$(echo "$input" | grep -oP 'city_name=\K[^&]*' | sed 's/%20/ /g')
+        lat=$(echo "$input" | grep -oP 'lat=\K[^&]*')
+        lon=$(echo "$input" | grep -oP 'lon=\K[^&]*')
+
+        # Get the current temperature for the city
+        current_temp=$(get_weather "$lat" "$lon")
+
+        # Compare guessed temperature with the actual temperature
+        # bc is a calculator tool.
+        # -l adds floating-point support and advanced math functions.
+        difference=$(echo "$temp_guess - $current_temp" | bc -l)
+        # awk is being used to process a single column of numbers (the first field).
+        abs_difference=$(echo "$difference" | awk '{if ($1<0) print -$1; else print $1}')
+        if (( $(echo "$abs_difference < 5" | bc -l) )); then
+            echo "<p>You won! Your guess was within 5°C of the actual temperature: $current_temp°C.</p>"
+        else
+            echo "<p>You lost. Your guess was more than 5°C off from the actual temperature: $current_temp°C.</p>"
+        fi
+    fi
+
+    # Ask if the user wants to play again
+    echo "<p><a href=''>Play Again</a></p>"
+    echo "</body></html>"
+}
+
+# Start the game
+start_game
