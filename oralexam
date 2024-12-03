@@ -1,45 +1,81 @@
 #!/bin/bash
 
-# API Key for OpenWeatherMap
-API_KEY="77a66764be0e2ebd92b491f764d791ea"
+# Function to fetch the weather data using Open Meteo API
+get_weather() {
+    local lat=$1
+    local lon=$2
+    # Fetch weather data for the city
+    weather_data=$(curl -s "https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m")
+    # Get the temperature for the current hour
+    temp=$(echo "$weather_data" | jq '.hourly.temperature_2m[0]')
+    echo "$temp"
+}
 
-# Create an array of cities
-cities=("Tokyo" "Paris" "Cape Town" "New York" "Sydney" "Mumbai" "Buenos Aires" "Cairo" "Berlin" "Bangkok")
+# Function to start the game
+start_game() {
+    # Read city data from cityfiles.txt
+    cities=()
+    while IFS= read -r line; do
+        cities+=("$line")
+    done < "cityfiles.txt"
 
-# Pick a random city
-random_city=${cities[$RANDOM % ${#cities[@]}]}
+    # Select a random city
+    random_city=${cities[$RANDOM % ${#cities[@]}]}
+    
+    # Extract city name, latitude, and longitude
+    city_name=$(echo "$random_city" | cut -d ' ' -f 1-2)
+    lat=$(echo "$random_city" | grep -oP 'Latitude: \K[^\s,]*')
+    lon=$(echo "$random_city" | grep -oP 'Longitude: \K[^\s,]*')
 
-# Output the randomly selected city
-echo "Randomly Selected City: $random_city"
+    # Get the current temperature for the city
+    current_temp=$(get_weather "$lat" "$lon")
 
-# Ask the user to guess the temperature
-echo "What do you think the current temperature in $random_city is (in Celsius)?"
-read user_guess
+    # Start HTML page
+    echo "Content-Type: text/html; charset=utf-8"
+    echo ""
+    echo "<html><head><title>Weather Guessing Game</title></head><body>"
 
-# Store the guess in a variable
-user_temperature_guess=$user_guess
+    # Game instructions and city hint
+    echo "<h1>Welcome to the City and Temperature Guessing Game!</h1>"
+    echo "<p>Try to guess the current temperature in the city below.</p>"
+    echo "<p><strong>Hint:</strong> The city is $city_name.</p>"
 
-# Get the actual temperature from the OpenWeatherMap API
-response=$(curl -s "https://openweathermap.org/=$random_city&appid=$API_KEY&units=metric")
-actual_temperature=$(echo $response | jq '.main.temp')
+    # Display the temperature guess form with hidden fields for the city info
+    echo "<form method='POST' action=''>"
+    echo "<label for='temp_guess'>Enter your guess for the temperature in Celsius:</label><br>"
+    echo "<input type='number' name='temp_guess' id='temp_guess' required><br><br>"
+    echo "<input type='hidden' name='city_name' value='$city_name'>"
+    echo "<input type='hidden' name='lat' value='$lat'>"
+    echo "<input type='hidden' name='lon' value='$lon'>"
+    echo "<input type='submit' value='Submit Guess'>"
+    echo "</form>"
 
-# Check if the temperature was retrieved successfully
-if [[ $actual_temperature == "null" || -z $actual_temperature ]]; then
-    echo "Could not retrieve temperature for $random_city. Please check the city name or API key."
-    exit 1
-fi
+    # Process the submitted guess if form is POSTed
+    if [ "$REQUEST_METHOD" == "POST" ]; then
+        # Get form values (temperature guess and city info)
+        read -r input
+        temp_guess=$(echo "$input" | grep -oP 'temp_guess=\K[^&]*' | sed 's/%20/ /g')
+        city_name=$(echo "$input" | grep -oP 'city_name=\K[^&]*' | sed 's/%20/ /g')
+        lat=$(echo "$input" | grep -oP 'lat=\K[^&]*')
+        lon=$(echo "$input" | grep -oP 'lon=\K[^&]*')
 
-# Output the user's guess
-echo "You guessed: $user_temperature_guess°C."
+        # Get the current temperature for the city
+        current_temp=$(get_weather "$lat" "$lon")
 
-# Output the actual temperature
-echo "The actual temperature in $random_city is $actual_temperature°C."
+        # Compare guessed temperature with the actual temperature
+        difference=$(echo "$temp_guess - $current_temp" | bc -l)
+        abs_difference=$(echo "$difference" | awk '{if ($1<0) print -$1; else print $1}')
+        if (( $(echo "$abs_difference < 5" | bc -l) )); then
+            echo "<p>You won! Your guess was within 5°C of the actual temperature: $current_temp°C.</p>"
+        else
+            echo "<p>You lost. Your guess was more than 5°C off from the actual temperature: $current_temp°C.</p>"
+        fi
+    fi
 
-# Compare the guess with the actual temperature
-if (( $(echo "$user_temperature_guess == $actual_temperature" | bc -l) )); then
-    echo "Amazing! Your guess is correct."
-elif (( $(echo "$user_temperature_guess > $actual_temperature" | bc -l) )); then
-    echo "Too high! Your guess is above the actual temperature."
-else
-    echo "Too low! Your guess is below the actual temperature."
-fi
+    # Ask if the user wants to play again
+    echo "<p><a href=''>Play Again</a></p>"
+    echo "</body></html>"
+}
+
+# Start the game
+start_game
